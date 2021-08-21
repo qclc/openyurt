@@ -116,6 +116,7 @@ func NewYurtHubCertManager(cfg *config.YurtHubConfiguration) (interfaces.YurtCer
 // Start init certificate manager and certs for hub agent
 func (ycm *yurtHubCertManager) Start() {
 	// 1. create ca file for hub certificate manager
+	// 1. 初始化本地的CA证书, 实际就是取得apiserver的CA证书存入本地
 	err := ycm.initCaCert()
 	if err != nil {
 		klog.Errorf("failed to init ca cert, %v", err)
@@ -124,6 +125,7 @@ func (ycm *yurtHubCertManager) Start() {
 	klog.Infof("use %s ca file to bootstrap %s", ycm.caFile, ycm.hubName)
 
 	// 2. create bootstrap config file for hub certificate manager
+	// 2. 初始bootstrapConf文件, 包含了token信息, 用于客户端和apiserver进行不需要TLS的通信
 	err = ycm.initBootstrap()
 	if err != nil {
 		klog.Errorf("failed to init bootstrap %v", err)
@@ -131,6 +133,8 @@ func (ycm *yurtHubCertManager) Start() {
 	}
 
 	// 3. create client certificate manager for hub certificate manager
+	// 3. 创建一个Client Certificate Manager, 专门管理k8s客户端的认证信息, 包括发送CSR(认证签名请求)、轮转数字证书等
+	// 就是这一步实际生成了公私钥(每次轮转产生一个新的), 并发送了CSR请求(包含yurthub公钥和基本信息), 获得返回的数字证书
 	err = ycm.initClientCertificateManager()
 	if err != nil {
 		klog.Errorf("failed to init client cert manager, %v", err)
@@ -138,6 +142,7 @@ func (ycm *yurtHubCertManager) Start() {
 	}
 
 	// 4. create hub config file
+	// 4. 根据已经生成的认证文件信息(签过名的数字证书), 来生成yurthub与apiserver之间通信的kubeconfig
 	err = ycm.initHubConf()
 	if err != nil {
 		klog.Errorf("failed to init hub config, %v", err)
@@ -231,6 +236,10 @@ func (ycm *yurtHubCertManager) NotExpired() bool {
 }
 
 // initCaCert create ca file for hub certificate manager
+// 本地没有CA证书时:
+// 1. 首先创建一个不需要TLS认证的客户端, 本步骤的通信都是使用这个客户端
+// 2. 从apiserver上获取cluster info(获取这个不需要TLS认证)
+// 3. 再从cluster info中提取apiserver的CA证书, 写到本地的caFile这个路径下
 func (ycm *yurtHubCertManager) initCaCert() error {
 	caFile := ycm.getCaFile()
 	ycm.caFile = caFile
@@ -245,12 +254,14 @@ func (ycm *yurtHubCertManager) initCaCert() error {
 		klog.Infof("%s file not exists, so create it", caFile)
 	}
 
+	// 创建一个与apiserver通信的client配置文件, 设置跳过TLS认证
 	insecureRestConfig, err := createInsecureRestClientConfig(ycm.remoteServers[0])
 	if err != nil {
 		klog.Errorf("could not create insecure rest config, %v", err)
 		return err
 	}
 
+	// 根据上面创建的访问apiserver的client config来创建与apiserver进行通信的client
 	insecureClient, err := clientset.NewForConfig(insecureRestConfig)
 	if err != nil {
 		klog.Errorf("could not new insecure client, %v", err)
@@ -258,12 +269,14 @@ func (ycm *yurtHubCertManager) initCaCert() error {
 	}
 
 	// make sure configMap kube-public/cluster-info in k8s cluster beforehand
+	// 使用上面的客户端与apiserver通信,获取apiserver的cluster info, 获取这个不需要进行TLS认证
 	insecureClusterInfo, err := insecureClient.CoreV1().ConfigMaps(metav1.NamespacePublic).Get(context.Background(), ClusterInfoName, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("failed to get cluster-info configmap, %v", err)
 		return err
 	}
 
+	// 从cluster info中提取kubeconfig数据
 	kubeconfigStr, ok := insecureClusterInfo.Data[KubeconfigName]
 	if !ok || len(kubeconfigStr) == 0 {
 		return fmt.Errorf("no kubeconfig in cluster-info configmap of kube-public namespace")
@@ -278,6 +291,7 @@ func (ycm *yurtHubCertManager) initCaCert() error {
 		return fmt.Errorf("more than one cluster setting in cluster-info configmap")
 	}
 
+	// 从kubeconfig中获取集群的CA信息, 并写到caFile这个路径下
 	var clusterCABytes []byte
 	for _, cluster := range kubeConfig.Clusters {
 		clusterCABytes = cluster.CertificateAuthorityData
@@ -292,6 +306,7 @@ func (ycm *yurtHubCertManager) initCaCert() error {
 }
 
 // initBootstrap create bootstrap config file for hub certificate manager
+// 初始bootstrapConf文件, 包含了token信息, 用于客户端和apiserver进行不需要TLS的通信, apiserver针对这种通信方式只开放少量的几个权限
 func (ycm *yurtHubCertManager) initBootstrap() error {
 	bootstrapConfStore, err := disk.NewDiskStorage(ycm.rootDir)
 	if err != nil {
@@ -317,7 +332,13 @@ func (ycm *yurtHubCertManager) initBootstrap() error {
 }
 
 // initClientCertificateManager init hub client certificate manager
+// 创建一个Client Certificate Manager, 专门管理k8s客户端的认证信息, 是client-go的库
 func (ycm *yurtHubCertManager) initClientCertificateManager() error {
+	// 设置存储认证相关文件的位置信息, 此处最后生成的认证信息(包含证书(已经由apiserver签过名的),私钥信息), 存入单个文件为yurthub-current.pem
+	// 1. yurthub-current.pem文件中的CERTIFICATE就是数字证书,
+	//    每次建立TLS连接, yurthub会把这个证书发送给apiserver, apiserver使用CA机构(实际就是自己的)公钥解码数字证书获得yurthub的公钥
+	// 2. yurthub-current.pem文件中的PRIVATE KEY就是: yurthub公钥对应的私钥, 每次与apiserver发送消息会用该私钥加密, 只有用yurthub数字证书中的公钥才可以解码
+	//    其中私钥不是我们提供的, 而是开启证书轮转时, 或要进行证书签名请求时, CertificateManager自动生成新的公私钥对
 	s, err := certificate.NewFileStore(ycm.hubName, ycm.getPkiDir(), ycm.getPkiDir(), "", "")
 	if err != nil {
 		klog.Errorf("failed to init %s client cert store, %v", ycm.hubName, err)
@@ -327,9 +348,13 @@ func (ycm *yurtHubCertManager) initClientCertificateManager() error {
 	ycm.hubClientCertPath = s.CurrentPath()
 
 	m, err := certificate.NewManager(&certificate.Config{
-		ClientFn:   ycm.generateCertClientFn,
+		// 用于轮转证书时, 生成与apiserver进行通信的客户端
+		ClientFn: ycm.generateCertClientFn,
+		// 确定签名者信息,此处设为专门签名kubelet的签名者, 会有kube-controller自动为该请求签名
 		SignerName: certificates.KubeAPIServerClientKubeletSignerName,
+		// 证书至x509形式的证书
 		Template: &x509.CertificateRequest{
+			// 表示使用这个数字证书的使用者(组织和用户信息)
 			Subject: pkix.Name{
 				CommonName:   fmt.Sprintf("system:node:%s", ycm.nodeName),
 				Organization: []string{"system:nodes"},
@@ -341,12 +366,14 @@ func (ycm *yurtHubCertManager) initClientCertificateManager() error {
 			certificates.UsageClientAuth,
 		},
 
+		// 设置认证文件保存位置
 		CertificateStore: s,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to initialize client certificate manager: %v", err)
 	}
 	ycm.hubClientCertManager = m
+	// 当证书过期后, 用于后台自动轮转证书
 	m.Start()
 
 	return nil
@@ -373,11 +400,13 @@ func (ycm *yurtHubCertManager) getBootstrapClientConfig(healthyServer *url.URL) 
 	return util.LoadKubeletRestClientConfig(healthyServer)
 }
 
+// 用于生成轮转证书时, 与apiserver进行通信的客户端, 此处是: 若本地已经有签名好的证书, 则使用它; 否则使用BootstrapClientConfig
 func (ycm *yurtHubCertManager) generateCertClientFn(current *tls.Certificate) (certificatesclient.CertificateSigningRequestInterface, error) {
 	var cfg *restclient.Config
 	var healthyServer *url.URL
 	hubConfFile := ycm.getHubConfFile()
 
+	// 每隔30s轮转一次证书
 	_ = wait.PollInfinite(30*time.Second, func() (bool, error) {
 		healthyServer = ycm.remoteServers[0]
 		if healthyServer == nil {
@@ -387,6 +416,7 @@ func (ycm *yurtHubCertManager) generateCertClientFn(current *tls.Certificate) (c
 
 		// If we have a valid certificate, use that to fetch CSRs.
 		// Otherwise use the bootstrap conf file.
+		// 似乎只是检查了是否已经创建过了证书, 并没有进行证书的有效性验证
 		if current != nil {
 			klog.V(3).Infof("use %s config to create csr client", ycm.hubName)
 			// use the valid certificate
@@ -431,6 +461,7 @@ func (ycm *yurtHubCertManager) generateCertClientFn(current *tls.Certificate) (c
 }
 
 // initHubConf init hub agent conf file.
+// 根据已经生成的认证文件信息(签过名的数字证书), 来生成yurthub与apiserver之间通信的kubeconfig
 func (ycm *yurtHubCertManager) initHubConf() error {
 	hubConfFile := ycm.getHubConfFile()
 	if exists, err := util.FileExists(hubConfFile); exists {
@@ -503,6 +534,7 @@ func createBasic(apiServerAddr string, caCert []byte) *clientcmdapi.Config {
 }
 
 // createInsecureRestClientConfig create insecure rest client config.
+// 创建一个与apiserver通信的client配置文件, 设置跳过TLS认证
 func createInsecureRestClientConfig(remoteServer *url.URL) (*restclient.Config, error) {
 	if remoteServer == nil {
 		return nil, fmt.Errorf("no healthy remote server")
@@ -542,6 +574,7 @@ func createBootstrapConf(apiServerAddr, caFile, joinToken string) *clientcmdapi.
 }
 
 // createBootstrapConfFile create bootstrap conf file
+// 根据healthy的apiserver地址、yurthub的CA证书、join token来创建BootstrapConfFile, 并更新到本地磁盘上
 func (ycm *yurtHubCertManager) createBootstrapConfFile(joinToken string) error {
 	remoteServer := ycm.remoteServers[0]
 	if remoteServer == nil || len(remoteServer.Host) == 0 {

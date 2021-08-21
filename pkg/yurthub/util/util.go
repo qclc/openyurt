@@ -352,6 +352,7 @@ func LoadKubeConfig(kubeconfig string) (*clientcmdapi.Config, error) {
 	return loadedConfig, nil
 }
 
+// 生成kubeConfig文件并保存进本地kubeconfigPath目录下
 func CreateKubeConfigFile(kubeClientConfig *rest.Config, kubeconfigPath string) error {
 	// Get the CA data from the bootstrap client config.
 	caFile, caData := kubeClientConfig.CAFile, []byte{}
