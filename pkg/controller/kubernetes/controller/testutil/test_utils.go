@@ -28,7 +28,52 @@ import (
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch"
+	admissionv1 "k8s.io/api/admission/v1"
+	admissionv1beta1 "k8s.io/api/admission/v1beta1"
+	admissionregv1 "k8s.io/api/admissionregistration/v1"
+	admissionregv1beta1 "k8s.io/api/admissionregistration/v1beta1"
+	apiserverinternalv1alpha1 "k8s.io/api/apiserverinternal/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
+	appsv1beta1 "k8s.io/api/apps/v1beta1"
+	appsv1beta2 "k8s.io/api/apps/v1beta2"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	authenticationv1beta1 "k8s.io/api/authentication/v1beta1"
+	authorizationv1 "k8s.io/api/authorization/v1"
+	authorizationv1beta1 "k8s.io/api/authorization/v1beta1"
+	autoscalingv1 "k8s.io/api/autoscaling/v1"
+	autoscalingv2beta1 "k8s.io/api/autoscaling/v2beta1"
+	autoscalingv2beta2 "k8s.io/api/autoscaling/v2beta2"
+	batchv1 "k8s.io/api/batch/v1"
+	batchv1beta1 "k8s.io/api/batch/v1beta1"
+	certificatesv1 "k8s.io/api/certificates/v1"
+	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
+	coordinationv1 "k8s.io/api/coordination/v1"
+	coordinationv1beta1 "k8s.io/api/coordination/v1beta1"
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	discoveryv1beta1 "k8s.io/api/discovery/v1beta1"
+	eventsv1 "k8s.io/api/events/v1"
+	eventsv1beta1 "k8s.io/api/events/v1beta1"
+	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
+	flowcontrolv1alpha1 "k8s.io/api/flowcontrol/v1alpha1"
+	flowcontrolv1beta1 "k8s.io/api/flowcontrol/v1beta1"
+	imagepolicyv1alpha1 "k8s.io/api/imagepolicy/v1alpha1"
+	networkingv1 "k8s.io/api/networking/v1"
+	networkingv1beta1 "k8s.io/api/networking/v1beta1"
+	nodev1 "k8s.io/api/node/v1"
+	nodev1alpha1 "k8s.io/api/node/v1alpha1"
+	nodev1beta1 "k8s.io/api/node/v1beta1"
+	policyv1 "k8s.io/api/policy/v1"
+	policyv1beta1 "k8s.io/api/policy/v1beta1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	rbacv1alpha1 "k8s.io/api/rbac/v1alpha1"
+	rbacv1beta1 "k8s.io/api/rbac/v1beta1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
+	schedulingv1alpha1 "k8s.io/api/scheduling/v1alpha1"
+	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
+	storagev1 "k8s.io/api/storage/v1"
+	storagev1alpha1 "k8s.io/api/storage/v1alpha1"
+	storagev1beta1 "k8s.io/api/storage/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,18 +84,74 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/watch"
+	v1apply "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	ref "k8s.io/client-go/tools/reference"
+	utilnode "k8s.io/component-helpers/node/topology"
 	"k8s.io/klog/v2"
-
-	utilnode "github.com/openyurtio/openyurt/pkg/controller/kubernetes/util/node"
 )
 
 var (
-	keyFunc = cache.DeletionHandlingMetaNamespaceKeyFunc
+	keyFunc    = cache.DeletionHandlingMetaNamespaceKeyFunc
+	testScheme = runtime.NewScheme()
 )
+
+var groups = []runtime.SchemeBuilder{
+	admissionv1beta1.SchemeBuilder,
+	admissionv1.SchemeBuilder,
+	admissionregv1beta1.SchemeBuilder,
+	admissionregv1.SchemeBuilder,
+	apiserverinternalv1alpha1.SchemeBuilder,
+	appsv1beta1.SchemeBuilder,
+	appsv1beta2.SchemeBuilder,
+	appsv1.SchemeBuilder,
+	authenticationv1beta1.SchemeBuilder,
+	authenticationv1.SchemeBuilder,
+	authorizationv1beta1.SchemeBuilder,
+	authorizationv1.SchemeBuilder,
+	autoscalingv1.SchemeBuilder,
+	autoscalingv2beta1.SchemeBuilder,
+	autoscalingv2beta2.SchemeBuilder,
+	batchv1beta1.SchemeBuilder,
+	batchv1.SchemeBuilder,
+	certificatesv1.SchemeBuilder,
+	certificatesv1beta1.SchemeBuilder,
+	coordinationv1.SchemeBuilder,
+	coordinationv1beta1.SchemeBuilder,
+	v1.SchemeBuilder,
+	discoveryv1.SchemeBuilder,
+	discoveryv1beta1.SchemeBuilder,
+	eventsv1.SchemeBuilder,
+	eventsv1beta1.SchemeBuilder,
+	extensionsv1beta1.SchemeBuilder,
+	flowcontrolv1alpha1.SchemeBuilder,
+	flowcontrolv1beta1.SchemeBuilder,
+	imagepolicyv1alpha1.SchemeBuilder,
+	networkingv1.SchemeBuilder,
+	networkingv1beta1.SchemeBuilder,
+	nodev1.SchemeBuilder,
+	nodev1alpha1.SchemeBuilder,
+	nodev1beta1.SchemeBuilder,
+	policyv1.SchemeBuilder,
+	policyv1beta1.SchemeBuilder,
+	rbacv1alpha1.SchemeBuilder,
+	rbacv1beta1.SchemeBuilder,
+	rbacv1.SchemeBuilder,
+	schedulingv1alpha1.SchemeBuilder,
+	schedulingv1beta1.SchemeBuilder,
+	schedulingv1.SchemeBuilder,
+	storagev1alpha1.SchemeBuilder,
+	storagev1beta1.SchemeBuilder,
+	storagev1.SchemeBuilder,
+}
+
+func init() {
+	for _, builder := range groups {
+		builder.AddToScheme(testScheme)
+	}
+}
 
 // FakeNodeHandler is a fake implementation of NodesInterface and NodeInterface. It
 // allows test cases to have fine-grained control over mock behaviors. We also need
@@ -349,6 +450,36 @@ func (m *FakeNodeHandler) Patch(_ context.Context, name string, pt types.PatchTy
 	return &updatedNode, nil
 }
 
+// Apply applies a NodeApplyConfiguration to a Node in the fake store.
+func (m *FakeNodeHandler) Apply(ctx context.Context, node *v1apply.NodeApplyConfiguration, opts metav1.ApplyOptions) (*v1.Node, error) {
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(node)
+	if err != nil {
+		return nil, err
+	}
+	name := node.Name
+	if name == nil {
+		return nil, fmt.Errorf("deployment.Name must be provided to Apply")
+	}
+
+	return m.Patch(ctx, *name, types.ApplyPatchType, data, patchOpts)
+}
+
+// ApplyStatus applies a status of a Node in the fake store.
+func (m *FakeNodeHandler) ApplyStatus(ctx context.Context, node *v1apply.NodeApplyConfiguration, opts metav1.ApplyOptions) (*v1.Node, error) {
+	patchOpts := opts.ToPatchOptions()
+	data, err := json.Marshal(node)
+	if err != nil {
+		return nil, err
+	}
+	name := node.Name
+	if name == nil {
+		return nil, fmt.Errorf("deployment.Name must be provided to Apply")
+	}
+
+	return m.Patch(ctx, *name, types.ApplyPatchType, data, patchOpts, "status")
+}
+
 // FakeRecorder is used as a fake during testing.
 type FakeRecorder struct {
 	sync.Mutex
@@ -375,7 +506,7 @@ func (f *FakeRecorder) AnnotatedEventf(obj runtime.Object, annotations map[strin
 func (f *FakeRecorder) generateEvent(obj runtime.Object, timestamp metav1.Time, eventtype, reason, message string) {
 	f.Lock()
 	defer f.Unlock()
-	ref, err := ref.GetReference(runtime.NewScheme(), obj)
+	ref, err := ref.GetReference(testScheme, obj)
 	if err != nil {
 		klog.Errorf("Encountered error while getting reference: %v", err)
 		return
@@ -498,15 +629,13 @@ func GetKey(obj interface{}, t *testing.T) string {
 	}
 	val := reflect.ValueOf(obj).Elem()
 	name := val.FieldByName("Name").String()
-	kind := val.FieldByName("Kind").String()
-	// Note kind is not always set in the tests, so ignoring that for now
-	if len(name) == 0 || len(kind) == 0 {
+	if len(name) == 0 {
 		t.Errorf("Unexpected object %v", obj)
 	}
 
 	key, err := keyFunc(obj)
 	if err != nil {
-		t.Errorf("Unexpected error getting key for %v %v: %v", kind, name, err)
+		t.Errorf("Unexpected error getting key for %T %v: %v", val.Interface(), name, err)
 		return ""
 	}
 	return key

@@ -19,17 +19,18 @@ package store
 import (
 	"crypto/tls"
 
-	"k8s.io/client-go/util/certificate"
 	"k8s.io/klog/v2"
+
+	"github.com/openyurtio/openyurt/pkg/util/certificate"
 )
 
-// fileStoreWrapper is a wrapper for "k8s.io/client-go/util/certificate#FileStore"
+// fileStoreWrapper is a wrapper for "github.com/openyurtio/openyurt/pkg/util/certificate#FileStore"
 // This wrapper increases tolerance for unexpected situations and is more robust.
 type fileStoreWrapper struct {
 	certificate.FileStore
 }
 
-// NewFileStoreWrapper returns a wrapper for "k8s.io/client-go/util/certificate#FileStore"
+// NewFileStoreWrapper returns a wrapper for "github.com/openyurtio/openyurt/pkg/util/certificate#FileStore"
 // This wrapper increases tolerance for unexpected situations and is more robust.
 func NewFileStoreWrapper(pairNamePrefix, certDirectory, keyDirectory, certFile, keyFile string) (certificate.FileStore, error) {
 	fileStore, err := certificate.NewFileStore(pairNamePrefix, certDirectory, keyDirectory, certFile, keyFile)

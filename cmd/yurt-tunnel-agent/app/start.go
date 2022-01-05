@@ -22,12 +22,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/util/certificate"
 	"k8s.io/klog/v2"
 
 	"github.com/openyurtio/openyurt/cmd/yurt-tunnel-agent/app/config"
 	"github.com/openyurtio/openyurt/cmd/yurt-tunnel-agent/app/options"
 	"github.com/openyurtio/openyurt/pkg/projectinfo"
+	"github.com/openyurtio/openyurt/pkg/util/certificate"
 	"github.com/openyurtio/openyurt/pkg/util/certmanager"
 	"github.com/openyurtio/openyurt/pkg/yurttunnel/agent"
 	"github.com/openyurtio/openyurt/pkg/yurttunnel/constants"

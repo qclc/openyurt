@@ -17,9 +17,8 @@ limitations under the License.
 package interfaces
 
 import (
-	"k8s.io/client-go/util/certificate"
-
 	"github.com/openyurtio/openyurt/cmd/yurthub/app/config"
+	"github.com/openyurtio/openyurt/pkg/util/certificate"
 )
 
 // YurtCertificateManager is responsible for managing node certificate for yurthub

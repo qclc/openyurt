@@ -26,7 +26,8 @@ import (
 	"os"
 
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/certificate"
+
+	"github.com/openyurtio/openyurt/pkg/util/certificate"
 )
 
 // GenTLSConfigUseCertMgrAndCertPool generates a TLS configuration
